@@ -5,28 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>営業ツール</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#1565c0">
+<meta name="theme-color" content="#37474F">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="営業ツール">
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>
-  body{margin:0;font-family:system-ui,sans-serif;background:#1565c0;color:#fff;
-       display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;}
-  .spinner{width:46px;height:46px;border:5px solid rgba(255,255,255,.3);border-top-color:#fff;
-           border-radius:50%;animation:spin .8s linear infinite;}
-  @keyframes spin{to{transform:rotate(360deg);}}
-  p{margin-top:16px;font-size:16px;font-weight:bold;}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Yu Gothic","Meiryo",sans-serif; background: #f5f6f7; color: #1a1a1a; }
+  .header { background: #37474F; color: #fff; padding: 16px 20px; font-size: 22px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .menu { padding: 20px 16px; display: flex; flex-direction: column; gap: 16px; max-width: 720px; margin: 0 auto; }
+  .card { display: block; text-decoration: none; border-radius: 16px; padding: 28px 20px; text-align: center; color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+  .card:active { opacity: .85; }
+  .card .title { font-size: 30px; font-weight: 700; display: inline-flex; align-items: center; gap: 10px; }
+  .card .sub { font-size: 16px; margin-top: 10px; color: rgba(255,255,255,.9); }
+  .c-ketuhin { background: #E8710A; }
+  .c-zaiko   { background: #0F6E56; }
 </style>
 </head>
 <body>
-<div class="spinner"></div>
-<p>営業ツールを開いています...</p>
+  <div class="header">📋 メニュー</div>
+  <div class="menu">
+
+    <a class="card c-ketuhin" href="https://script.google.com/macros/s/AKfycbwWpgi_NFcY1CAJL-hDZyorcay8dSgncDph_Uib16MBoLp5t2xD5GCqYnzC3TeLhdNc/exec">
+      <div class="title">⚠️ 欠品リスト</div>
+      <div class="sub">欠品・不足品の一覧を確認</div>
+    </a>
+
+    <a class="card c-zaiko" href="https://script.google.com/macros/s/AKfycbyGv_Grmt-l-fo0OSU_3eN__n-PSfQroYBuyFYG7rQT_VJm1GIG_UzA9VAx6augd1tq9Q/exec">
+      <div class="title">🔍 在庫検索</div>
+      <div class="sub">商品名・ロット別の在庫確認</div>
+    </a>
+
+  </div>
 <script>
-// 営業ツール本体（Apps Script）へ即遷移。ホーム画面から起動→このページ→本体、の流れ。
-const EIGYO_URL = "https://script.google.com/macros/s/AKfycbxm443-W8iZcuGkjUond9cxHb6URkxXFieirrUL27diiIGwsSx8liGMMsK8WpakKOAv/exec";
-if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
-location.replace(EIGYO_URL);
+  if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').catch(function(){}); }
 </script>
 </body>
 </html>
