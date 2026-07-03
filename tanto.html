@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>担当割振り一覧</title>
+<meta name="theme-color" content="#37474F">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Yu Gothic","Meiryo",sans-serif; background: #f5f6f7; color: #1a1a1a; }
+  .header { background: #37474F; color: #fff; padding: 14px 16px; font-size: 19px; font-weight: 700;
+            display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
+  .header a { color: #cfd8dc; text-decoration: none; font-size: 14px; font-weight: normal; }
+  #upd { padding: 8px 16px 0; font-size: 12px; color: #777; }
+  /* 担当選択チップ */
+  #chips { display: flex; gap: 8px; overflow-x: auto; padding: 10px 16px; -webkit-overflow-scrolling: touch; }
+  .chip { flex: 0 0 auto; padding: 9px 18px; border-radius: 20px; border: 1px solid #b0bec5; background: #fff;
+          font-size: 16px; font-weight: 700; color: #455a64; }
+  .chip.on { background: #5E35B1; border-color: #5E35B1; color: #fff; }
+  #sum { padding: 4px 16px 8px; font-size: 14px; color: #455a64; font-weight: 700; }
+  /* 品目カード */
+  .list { padding: 0 12px 24px; max-width: 720px; margin: 0 auto; }
+  .item { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.1); padding: 12px 14px;
+          margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+  .item .info { flex: 1; min-width: 0; }
+  .item .nm { font-size: 15px; font-weight: 700; line-height: 1.4; }
+  .item .pk { display: inline-block; margin-top: 5px; background: #eceff1; color: #455a64;
+              border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 700; }
+  .item .qty { font-size: 26px; font-weight: 700; color: #5E35B1; min-width: 54px; text-align: right; }
+  .item .qty small { font-size: 12px; color: #90a4ae; font-weight: normal; }
+  .item.zero { opacity: .45; }
+  #msg { text-align: center; padding: 40px 16px; color: #777; }
+</style>
+</head>
+<body>
+<div class="header"><span>📋 担当割振り一覧</span><a href="./index.html">≡ メニュー</a></div>
+<div id="upd"></div>
+<div id="chips"></div>
+<div id="sum"></div>
+<div class="list" id="list"><div id="msg">読み込み中...</div></div>
+
+<script>
+const SHEET_ID = "13AOWlUPcbaDamcEJKJhbjukDypwzQ95gUioeWywgpU0";
+const SHEET_NAME = "シート1";
+
+let table = null;      // gviz table
+let codes = [];        // [{code:'11', col:4}, ...]
+let items = [];        // [{cd,name,pack,total,per:{code:qty}}]
+let sel = "ALL";
+
+function cellV(row, i){ const c = row.c[i]; return (c && c.v != null) ? c.v : ""; }
+function cellF(row, i){ const c = row.c[i]; return c ? (c.f != null ? c.f : (c.v != null ? String(c.v) : "")) : ""; }
+
+window.onGviz = function(resp){
+  try{
+    table = resp.table;
+    const rows = table.rows;
+    // 1行目：D列=更新時刻、E列以降=担当コード
+    const r0 = rows[0];
+    document.getElementById("upd").textContent = "使用数データ更新: " + cellF(r0, 3);
+    codes = [];
+    for (let i = 4; i < table.cols.length; i++) {
+      const v = cellF(r0, i).trim();
+      if (v !== "") codes.push({ code: v, col: i });
+    }
+    // 「品目名」ヘッダー行を探し、それ以降がデータ
+    let h = 1;
+    for (let i = 0; i < Math.min(rows.length, 5); i++) { if (cellF(rows[i], 1).indexOf("品目名") >= 0) { h = i; break; } }
+    items = [];
+    for (let i = h + 1; i < rows.length; i++) {
+      const r = rows[i];
+      const name = cellF(r, 1).trim();
+      if (!name) continue;
+      const per = {};
+      codes.forEach(c => { const v = Number(cellV(r, c.col)); per[c.code] = isFinite(v) ? v : 0; });
+      const tv = Number(cellV(r, 3));
+      items.push({ cd: cellF(r, 0), name: name, pack: cellF(r, 2), total: isFinite(tv) ? tv : 0, per: per });
+    }
+    buildChips(); render();
+  }catch(e){ document.getElementById("msg").textContent = "データ解析エラー: " + e; }
+};
+
+function buildChips(){
+  const el = document.getElementById("chips");
+  el.innerHTML = "";
+  const mk = (label, val) => {
+    const b = document.createElement("button");
+    b.className = "chip" + (sel === val ? " on" : "");
+    b.textContent = label;
+    b.onclick = () => { sel = val; buildChips(); render(); };
+    return b;
+  };
+  el.appendChild(mk("全体", "ALL"));
+  codes.forEach(c => el.appendChild(mk("担当" + c.code, c.code)));
+}
+
+function render(){
+  const list = document.getElementById("list");
+  const isAll = (sel === "ALL");
+  const rows = items
+    .map(it => ({ it: it, q: isAll ? it.total : (it.per[sel] || 0) }))
+    .filter(x => isAll ? true : x.q > 0)          // 担当選択時は割振りありのみ
+    .sort((a, b) => b.q - a.q);
+  let n = 0, total = 0;
+  let html = "";
+  rows.forEach(x => {
+    n++; total += x.q;
+    html += '<div class="item' + (x.q === 0 ? ' zero' : '') + '">'
+          + '<div class="info"><div class="nm">' + esc(x.it.name) + '</div>'
+          + '<span class="pk">' + esc(x.it.pack) + '</span></div>'
+          + '<div class="qty">' + x.q + '<small> 個</small></div></div>';
+  });
+  list.innerHTML = html || '<div id="msg">割振りはありません</div>';
+  document.getElementById("sum").textContent =
+    (isAll ? "全体" : "担当" + sel) + "：" + n + "品目 / 合計 " + total + " 個";
+}
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+// gviz JSONP 読込（リンク共有シートをそのまま取得。営業ツールと同じくネット必須）
+(function(){
+  const s = document.createElement("script");
+  s.src = "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
+          "/gviz/tq?tqx=responseHandler:onGviz&sheet=" + encodeURIComponent(SHEET_NAME);
+  s.onerror = () => { document.getElementById("msg").textContent = "読み込みに失敗しました（通信環境を確認してください）"; };
+  document.body.appendChild(s);
+})();
+</script>
+</body>
+</html>
