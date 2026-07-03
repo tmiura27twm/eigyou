@@ -12,23 +12,25 @@
             display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
   .header a { color: #cfd8dc; text-decoration: none; font-size: 14px; font-weight: normal; }
   #upd { padding: 8px 16px 0; font-size: 12px; color: #777; }
-  /* 担当選択チップ */
-  #chips { display: flex; gap: 8px; overflow-x: auto; padding: 10px 16px; -webkit-overflow-scrolling: touch; }
-  .chip { flex: 0 0 auto; padding: 9px 18px; border-radius: 20px; border: 1px solid #b0bec5; background: #fff;
-          font-size: 16px; font-weight: 700; color: #455a64; }
+  /* 担当選択チップ（担当者名） */
+  #chips { display: flex; gap: 8px; overflow-x: auto; padding: 10px 12px; -webkit-overflow-scrolling: touch;
+           position: sticky; top: 51px; background: #f5f6f7; z-index: 9; }
+  .chip { flex: 0 0 auto; padding: 10px 16px; border-radius: 22px; border: 1px solid #b0bec5; background: #fff;
+          font-size: 15px; font-weight: 700; color: #455a64; white-space: nowrap; }
   .chip.on { background: #5E35B1; border-color: #5E35B1; color: #fff; }
   #sum { padding: 4px 16px 8px; font-size: 14px; color: #455a64; font-weight: 700; }
-  /* 品目カード */
-  .list { padding: 0 12px 24px; max-width: 720px; margin: 0 auto; }
-  .item { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.1); padding: 12px 14px;
-          margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+  /* 品目リスト（コンパクト表示） */
+  .list { padding: 0 10px 24px; max-width: 720px; margin: 0 auto; }
+  .item { background: #fff; border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.08); padding: 10px 12px;
+          margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
   .item .info { flex: 1; min-width: 0; }
-  .item .nm { font-size: 15px; font-weight: 700; line-height: 1.4; }
-  .item .pk { display: inline-block; margin-top: 5px; background: #eceff1; color: #455a64;
-              border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 700; }
-  .item .qty { font-size: 26px; font-weight: 700; color: #5E35B1; min-width: 54px; text-align: right; }
+  .item .nm { font-size: 15px; font-weight: 700; line-height: 1.35; }
+  .item .pk { font-size: 12px; color: #607d8b; margin-top: 3px; font-weight: 700; }
+  .item .qty { font-size: 24px; font-weight: 700; color: #5E35B1; min-width: 60px; text-align: right; white-space: nowrap; }
   .item .qty small { font-size: 12px; color: #90a4ae; font-weight: normal; }
-  .item.zero { opacity: .45; }
+  .item.zero { background: #eceff1; box-shadow: none; }
+  .item.zero .nm, .item.zero .pk { color: #90a4ae; }
+  .item.zero .qty { color: #b0bec5; }
   #msg { text-align: center; padding: 40px 16px; color: #777; }
 </style>
 </head>
@@ -43,29 +45,47 @@
 const SHEET_ID = "13AOWlUPcbaDamcEJKJhbjukDypwzQ95gUioeWywgpU0";
 const SHEET_NAME = "シート1";
 
-let table = null;      // gviz table
-let codes = [];        // [{code:'11', col:4}, ...]
+let codes = [];        // [{code:'11', name:'片山', col:4}, ...]
+let names = null;      // 2行目（A2:M2）の値。gvizは数値列の文字を落とすため別リクエストで取得
 let items = [];        // [{cd,name,pack,total,per:{code:qty}}]
 let sel = "ALL";
+let gotData = null;
 
 function cellV(row, i){ const c = row.c[i]; return (c && c.v != null) ? c.v : ""; }
 function cellF(row, i){ const c = row.c[i]; return c ? (c.f != null ? c.f : (c.v != null ? String(c.v) : "")) : ""; }
 
-window.onGviz = function(resp){
+// 2行目（担当者名の行）だけ先に受信
+window.onGvizNames = function(resp){
   try{
-    table = resp.table;
-    const rows = table.rows;
-    // 1行目：D列=更新時刻、E列以降=担当コード
+    const r = resp.table.rows[0];
+    names = [];
+    for (let i = 0; i < resp.table.cols.length; i++) names.push(cellF(r, i).trim());
+  }catch(e){ names = []; }
+  if (gotData) parseAll();
+};
+
+// シート全体を受信
+window.onGviz = function(resp){
+  gotData = resp;
+  if (names !== null) parseAll();
+};
+
+function parseAll(){
+  try{
+    const table = gotData.table, rows = table.rows;
+    // 1行目：D列=更新時刻、E列以降=担当者CD
     const r0 = rows[0];
     document.getElementById("upd").textContent = "使用数データ更新: " + cellF(r0, 3);
-    codes = [];
-    for (let i = 4; i < table.cols.length; i++) {
-      const v = cellF(r0, i).trim();
-      if (v !== "") codes.push({ code: v, col: i });
-    }
-    // 「品目名」ヘッダー行を探し、それ以降がデータ
+    // 「品目名」ヘッダー行を探す
     let h = 1;
     for (let i = 0; i < Math.min(rows.length, 5); i++) { if (cellF(rows[i], 1).indexOf("品目名") >= 0) { h = i; break; } }
+    codes = [];
+    for (let i = 4; i < table.cols.length; i++) {
+      const cd = cellF(r0, i).trim();
+      if (cd === "") continue;
+      const nm = (names[i] || "").trim();            // 2行目の担当者名（未記入ならCD表示）
+      codes.push({ code: cd, name: nm || ("担当" + cd), col: i });
+    }
     items = [];
     for (let i = h + 1; i < rows.length; i++) {
       const r = rows[i];
@@ -78,7 +98,7 @@ window.onGviz = function(resp){
     }
     buildChips(); render();
   }catch(e){ document.getElementById("msg").textContent = "データ解析エラー: " + e; }
-};
+}
 
 function buildChips(){
   const el = document.getElementById("chips");
@@ -91,39 +111,44 @@ function buildChips(){
     return b;
   };
   el.appendChild(mk("全体", "ALL"));
-  codes.forEach(c => el.appendChild(mk("担当" + c.code, c.code)));
+  codes.forEach(c => el.appendChild(mk(c.name, c.code)));
 }
 
 function render(){
   const list = document.getElementById("list");
   const isAll = (sel === "ALL");
   const rows = items
-    .map(it => ({ it: it, q: isAll ? it.total : (it.per[sel] || 0) }))
-    .filter(x => isAll ? true : x.q > 0)          // 担当選択時は割振りありのみ
-    .sort((a, b) => b.q - a.q);
+    .map(it => ({ it: it, q: isAll ? it.total : (it.per[sel] || 0) }));   // シートの並び順のまま表示
   let n = 0, total = 0;
   let html = "";
   rows.forEach(x => {
-    n++; total += x.q;
+    if (x.q > 0) { n++; total += x.q; }
     html += '<div class="item' + (x.q === 0 ? ' zero' : '') + '">'
           + '<div class="info"><div class="nm">' + esc(x.it.name) + '</div>'
-          + '<span class="pk">' + esc(x.it.pack) + '</span></div>'
+          + '<div class="pk">' + esc(x.it.pack) + '</div></div>'
           + '<div class="qty">' + x.q + '<small> 個</small></div></div>';
   });
-  list.innerHTML = html || '<div id="msg">割振りはありません</div>';
-  document.getElementById("sum").textContent =
-    (isAll ? "全体" : "担当" + sel) + "：" + n + "品目 / 合計 " + total + " 個";
+  list.innerHTML = html || '<div id="msg">データがありません</div>';
+  const who = isAll ? "全体" : (codes.find(c => c.code === sel) || {}).name || sel;
+  document.getElementById("sum").textContent = isAll
+    ? "全体：" + n + "品目 / 在庫合計 " + total + " 個"
+    : who + "：割振 " + n + "品目 / 合計 " + total + " 個";
 }
 
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
-// gviz JSONP 読込（リンク共有シートをそのまま取得。営業ツールと同じくネット必須）
+// gviz JSONP 読込（リンク共有シートをそのまま取得。ネット必須）
+// ※担当者名の行(A2:M2)は、数値列だとgvizが文字を落とすため range指定で別取得する
 (function(){
-  const s = document.createElement("script");
-  s.src = "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
-          "/gviz/tq?tqx=responseHandler:onGviz&sheet=" + encodeURIComponent(SHEET_NAME);
-  s.onerror = () => { document.getElementById("msg").textContent = "読み込みに失敗しました（通信環境を確認してください）"; };
-  document.body.appendChild(s);
+  const base = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/gviz/tq?sheet=" + encodeURIComponent(SHEET_NAME);
+  const load = (src) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onerror = () => { document.getElementById("msg").textContent = "読み込みに失敗しました（通信環境を確認してください）"; };
+    document.body.appendChild(s);
+  };
+  load(base + "&range=A2:M2&tqx=responseHandler:onGvizNames");
+  load(base + "&tqx=responseHandler:onGviz");
 })();
 </script>
 </body>
