@@ -69,11 +69,11 @@ window.onZaiko = function(resp){
     inv = [];
     for (let i=0;i<rows.length;i++){
       const r=rows[i];
-      const cd=String(cellV(r,0)).trim();
-      if(cd===""||isNaN(Number(cd)))continue;      // 見出し・合計行はスキップ
+      const name=cellF(r,1).trim();
+      if(!name || name==='商品名') continue;        // タイトル/ヘッダー行だけ除外（英数字CDの商品も拾う）
       inv.push({
-        code: cd,
-        name: cellF(r,1),
+        code: cellF(r,0).trim(),                     // 英数字CDはgvizで空になる場合あり（名前で検索できるので可）
+        name: name,
         pkg:  cellF(r,2),
         lot:  cellF(r,3)||"(ロット無)",
         stock:Number(cellV(r,4)),
@@ -124,7 +124,7 @@ function doSearch(){
   for(const row of inv){
     const target = normalize(row.name+' '+row.code+' '+row.pkg);
     if(!kw.every(k=>target.indexOf(k)!==-1))continue;
-    const key=row.code+'|'+row.pkg;
+    const key=(row.code||('n:'+row.name))+'|'+row.pkg;   // CD空の品目は名前で区別（誤統合防止）
     if(!groups[key]){ groups[key]={code:row.code,name:row.name,pkg:row.pkg,total:0,lots:[]}; order.push(key); }
     groups[key].total += isNaN(row.stock)?0:row.stock;
     groups[key].lots.push({lot:row.lot, stock:isNaN(row.stock)?'—':row.stock, expiry:row.expiry, indate:row.indate, note:row.note});
@@ -156,7 +156,7 @@ function render(list){
     }
     html+='<div class="card"><div class="cardhead"><div>'+
       '<div class="pname">'+esc(p.name)+'</div>'+
-      '<div class="pmeta">包装: '+esc(p.pkg)+' ／ 商品CD: '+esc(p.code)+'</div>'+priceLine+
+      '<div class="pmeta">包装: '+esc(p.pkg)+' ／ 商品CD: '+esc(p.code||'－')+'</div>'+priceLine+
       '</div><div class="total">合計 '+p.total+'</div></div>'+
       '<table><thead><tr><th>ロット</th><th>在庫数</th><th>使用期限</th><th>入庫日</th><th>備考</th></tr></thead>'+
       '<tbody>'+rows+'</tbody></table></div>';
