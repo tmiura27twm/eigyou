@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>在庫検索</title>
+<meta name="theme-color" content="#0F6E56">
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Yu Gothic","Meiryo",sans-serif; margin: 0; background: #f5f6f7; color: #1a1a1a; }
+  .topbar { background: #0F6E56; color: #fff; padding: 12px 16px; font-size: 18px; font-weight: 700;
+            display: flex; align-items: center; justify-content: space-between; }
+  .topbar a { color: #c8e6c9; text-decoration: none; font-size: 14px; font-weight: normal; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 12px 16px 24px; }
+  .searchbar { display: flex; gap: 8px; position: sticky; top: 0; background: #f5f6f7; padding: 8px 0; z-index: 5; }
+  #kw { flex: 1; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; }
+  #btn { padding: 12px 18px; font-size: 16px; font-weight: 700; color: #fff; background: #0F6E56; border: none; border-radius: 8px; }
+  #btn:active { opacity: .8; }
+  .hint { font-size: 12px; color: #888; margin: 4px 0 8px; }
+  .status { font-size: 14px; color: #555; margin: 8px 0; }
+  .card { background: #fff; border: 1px solid #e3e5e4; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  .cardhead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .pname { font-size: 16px; font-weight: 700; }
+  .pmeta { font-size: 12px; color: #777; margin-top: 2px; }
+  .pprice { font-size: 12.5px; margin-top: 4px; color: #37474f; }
+  .pprice b { color: #0F6E56; }
+  .pprice .nb { display: inline-block; background: #fde7e7; color: #b71c1c; border-radius: 5px; padding: 1px 7px; font-weight: 700; }
+  .total { font-size: 14px; font-weight: 700; color: #0F6E56; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  th { text-align: left; color: #888; font-weight: 500; border-bottom: 1px solid #eee; padding: 6px 4px; }
+  td { padding: 6px 4px; border-bottom: 1px solid #f2f2f2; }
+  td:last-child { color: #666; font-size: 12px; max-width: 160px; word-break: break-all; }
+  .qty { font-weight: 700; }
+  .zero { color: #b00; }
+</style>
+</head>
+<body>
+<div class="topbar"><span>🔍 在庫検索</span><a href="./index.html">≡ メニュー</a></div>
+<div class="wrap">
+  <div class="searchbar">
+    <input id="kw" type="search" placeholder="商品名・CD・包装で検索（スペースで複合）" autofocus>
+    <button id="btn">検索</button>
+  </div>
+  <div class="hint">例：「ﾚﾊﾞﾐﾋﾟﾄﾞ 500」　半角カナ・全角どちらでもOK</div>
+  <div id="status" class="status">在庫データ読み込み中...</div>
+  <div id="results"></div>
+</div>
+
+<script>
+// ===== データ元（リンク共有スプレッドシートを直接読む。検索はスマホ内＝一瞬） =====
+const ZAIKO_SS  = "1yxdl0YUaEgmYmtUwfptDh1akwH6UCaljScuqbRr-mi8";   // 在庫スプシ（A:CD B:名 C:包装 D:ロット E:在庫 H:入庫 I:期限 J:備考）
+const MASTER_SS = "1GY-hwG62879m_U0QvRZ_VwWBTsXtrr5436iXYZESTjo";   // マスター（A:CD I:包装薬価 J:仕入単価）
+
+let inv = null;      // 在庫行
+let prices = null;   // 商品CD → [薬価, 原価]
+let updText = "";
+
+const kwEl = document.getElementById('kw');
+const statusEl = document.getElementById('status');
+const resultsEl = document.getElementById('results');
+
+function cellV(row,i){ const c=row.c[i]; return (c&&c.v!=null)?c.v:""; }
+function cellF(row,i){ const c=row.c[i]; return c?(c.f!=null?c.f:(c.v!=null?String(c.v):"")):""; }
+
+// --- 在庫データ受信 ---
+window.onZaiko = function(resp){
+  try{
+    const rows = resp.table.rows;
+    inv = [];
+    for (let i=0;i<rows.length;i++){
+      const r=rows[i];
+      const cd=String(cellV(r,0)).trim();
+      if(cd===""||isNaN(Number(cd)))continue;      // 見出し・合計行はスキップ
+      inv.push({
+        code: cd,
+        name: cellF(r,1),
+        pkg:  cellF(r,2),
+        lot:  cellF(r,3)||"(ロット無)",
+        stock:Number(cellV(r,4)),
+        indate:cellF(r,7),
+        expiry:cellF(r,8),
+        note: cellF(r,9)
+      });
+    }
+    // 1行目付近から更新時刻（日時セル）を拾う
+    for (let i=0;i<Math.min(rows.length,2);i++){
+      for (let j=0;j<resp.table.cols.length;j++){
+        const c=rows[i].c[j];
+        if(c&&c.v!=null&&String(c.v).indexOf("Date(")===0){ updText=cellF(rows[i],j); }
+      }
+    }
+    ready();
+  }catch(e){ statusEl.textContent="在庫データ解析エラー: "+e; }
+};
+
+// --- 薬価マスタ受信 ---
+window.onMaster = function(resp){
+  try{
+    const rows = resp.table.rows;
+    prices = {};
+    for (let i=0;i<rows.length;i++){
+      const r=rows[i];
+      const cd=String(cellV(r,0)).trim();
+      if(cd===""||isNaN(Number(cd)))continue;
+      const y=Number(String(cellV(r,1)).replace(/[,\s]/g,""))||0;
+      const g=Number(String(cellV(r,2)).replace(/[,\s]/g,""))||0;
+      if(y>0||g>0) prices[cd]=[y,g];
+    }
+    ready();
+  }catch(e){ prices={}; ready(); }
+};
+
+function ready(){
+  if(inv===null||prices===null)return;
+  statusEl.textContent = "準備OK（在庫 "+inv.length+" 行"+(updText?"・"+updText+" 更新":"")+"）";
+}
+
+function normalize(s){ return String(s||"").normalize('NFKC').toLowerCase(); }
+function esc(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function yen(n){ return n==null?'-':Number(n).toLocaleString('ja-JP')+'円'; }
+
+function doSearch(){
+  const kwRaw = kwEl.value.trim();
+  if(!kwRaw){ kwEl.focus(); return; }
+  if(inv===null){ statusEl.textContent="在庫データ読み込み中です。少し待ってから再度検索してください。"; return; }
+  const kw = normalize(kwRaw).split(/[\s　]+/).filter(k=>k);
+  const groups={}, order=[];
+  for(const row of inv){
+    const target = normalize(row.name+' '+row.code+' '+row.pkg);
+    if(!kw.every(k=>target.indexOf(k)!==-1))continue;
+    const key=row.code+'|'+row.pkg;
+    if(!groups[key]){ groups[key]={code:row.code,name:row.name,pkg:row.pkg,total:0,lots:[]}; order.push(key); }
+    groups[key].total += isNaN(row.stock)?0:row.stock;
+    groups[key].lots.push({lot:row.lot, stock:isNaN(row.stock)?'—':row.stock, expiry:row.expiry, indate:row.indate, note:row.note});
+  }
+  const list = order.map(k=>{
+    const g=groups[k];
+    g.lots.sort((a,b)=>String(a.expiry).localeCompare(String(b.expiry)));
+    const p=prices[g.code];
+    if(p&&p[0]>0){ g.yakka=p[0]; g.genka=p[1]; g.nebiki=Math.round((1-p[1]/p[0])*1000)/10; }
+    return g;
+  });
+  list.sort((a,b)=>b.total-a.total);
+  render(list.slice(0,50));
+}
+
+function render(list){
+  if(!list.length){ statusEl.textContent='該当する商品が見つかりませんでした。'; resultsEl.innerHTML=''; return; }
+  statusEl.textContent = list.length+' 件ヒット'+(updText?'（'+updText+' 更新）':'');
+  let html='';
+  list.forEach(p=>{
+    const rows=p.lots.map(l=>{
+      const z=(l.stock===0||l.stock==='—')?' zero':'';
+      return '<tr><td>'+esc(l.lot)+'</td><td class="qty'+z+'">'+esc(l.stock)+'</td><td>'+esc(l.expiry)+'</td><td>'+esc(l.indate)+'</td><td>'+esc(l.note)+'</td></tr>';
+    }).join('');
+    let priceLine='';
+    if(p.yakka!=null){
+      priceLine='<div class="pprice">薬価 <b>'+yen(p.yakka)+'</b>　原価 <b>'+yen(p.genka)+'</b>　'+
+                '<span class="nb">値引 '+(p.nebiki!=null?p.nebiki.toFixed(1):'-')+'%</span></div>';
+    }
+    html+='<div class="card"><div class="cardhead"><div>'+
+      '<div class="pname">'+esc(p.name)+'</div>'+
+      '<div class="pmeta">包装: '+esc(p.pkg)+' ／ 商品CD: '+esc(p.code)+'</div>'+priceLine+
+      '</div><div class="total">合計 '+p.total+'</div></div>'+
+      '<table><thead><tr><th>ロット</th><th>在庫数</th><th>使用期限</th><th>入庫日</th><th>備考</th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table></div>';
+  });
+  resultsEl.innerHTML=html;
+}
+
+document.getElementById('btn').addEventListener('click', doSearch);
+kwEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); kwEl.blur(); doSearch(); } });
+
+// ===== 起動時に在庫＋薬価を並行読み込み（以降の検索は通信なし＝一瞬） =====
+(function(){
+  const load=(src)=>{ const s=document.createElement('script'); s.src=src;
+    s.onerror=()=>{ statusEl.textContent='データ読み込み失敗（通信環境を確認してください）'; };
+    document.body.appendChild(s); };
+  load('https://docs.google.com/spreadsheets/d/'+ZAIKO_SS+'/gviz/tq?tqx=responseHandler:onZaiko');
+  load('https://docs.google.com/spreadsheets/d/'+MASTER_SS+'/gviz/tq?gid=0&tqx=responseHandler:onMaster&tq='+encodeURIComponent('select A,I,J'));
+})();
+</script>
+</body>
+</html>
