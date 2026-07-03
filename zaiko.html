@@ -82,13 +82,9 @@ window.onZaiko = function(resp){
         note: cellF(r,9)
       });
     }
-    // 1行目付近から更新時刻（日時セル）を拾う
-    for (let i=0;i<Math.min(rows.length,2);i++){
-      for (let j=0;j<resp.table.cols.length;j++){
-        const c=rows[i].c[j];
-        if(c&&c.v!=null&&String(c.v).indexOf("Date(")===0){ updText=cellF(rows[i],j); }
-      }
-    }
+    // データを取得した時刻（このページは開くたびにシートの最新を読むので、これが実質の鮮度）
+    const n=new Date();
+    updText=('0'+n.getHours()).slice(-2)+':'+('0'+n.getMinutes()).slice(-2);
     ready();
   }catch(e){ statusEl.textContent="在庫データ解析エラー: "+e; }
 };
@@ -112,7 +108,7 @@ window.onMaster = function(resp){
 
 function ready(){
   if(inv===null||prices===null)return;
-  statusEl.textContent = "準備OK（在庫 "+inv.length+" 行"+(updText?"・"+updText+" 更新":"")+"）";
+  statusEl.textContent = "準備OK（在庫 "+inv.length+" 行"+(updText?"・"+updText+" 取得":"")+"）";
 }
 
 function normalize(s){ return String(s||"").normalize('NFKC').toLowerCase(); }
@@ -146,7 +142,7 @@ function doSearch(){
 
 function render(list){
   if(!list.length){ statusEl.textContent='該当する商品が見つかりませんでした。'; resultsEl.innerHTML=''; return; }
-  statusEl.textContent = list.length+' 件ヒット'+(updText?'（'+updText+' 更新）':'');
+  statusEl.textContent = list.length+' 件ヒット'+(updText?'（'+updText+' 取得）':'');
   let html='';
   list.forEach(p=>{
     const rows=p.lots.map(l=>{
