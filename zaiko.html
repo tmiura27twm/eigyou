@@ -67,6 +67,14 @@ function cellF(row,i){ const c=row.c[i]; return c?(c.f!=null?c.f:(c.v!=null?Stri
 window.onZaiko = function(resp){
   try{
     const rows = resp.table.rows;
+    // 更新中（書き込み途中）のデータを掴むと在庫0に見えるので、極端に少なければ採用せず再取得する
+    if(inv && inv.length && rows.length < inv.length*0.7){
+      statusEl.textContent="在庫データ更新中… 再取得します";
+      setTimeout(()=>{ const s=document.createElement('script');
+        s.src='https://docs.google.com/spreadsheets/d/'+ZAIKO_SS+'/gviz/tq?tqx=responseHandler:onZaiko&_='+Date.now();
+        document.body.appendChild(s); },4000);
+      return;
+    }
     inv = [];
     for (let i=0;i<rows.length;i++){
       const r=rows[i];
