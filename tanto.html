@@ -148,7 +148,9 @@ function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").rep
     s.onerror = () => { document.getElementById("msg").textContent = "読み込みに失敗しました（通信環境を確認してください）"; };
     document.body.appendChild(s);
   };
-  load(base + "&range=A2:M2&tqx=responseHandler:onGvizNames");
+  // 担当者名の行。担当が増えてもそのまま使えるよう、余裕をもってZ列まで取る
+  // （M列固定にしていたため、N列に足した担当が「担当36」と表示されていた）
+  load(base + "&range=A2:Z2&tqx=responseHandler:onGvizNames");
   load(base + "&tqx=responseHandler:onGviz");
 })();
 </script>
