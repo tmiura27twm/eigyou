@@ -33,6 +33,13 @@
   td:last-child { color: #666; font-size: 12px; max-width: 160px; word-break: break-all; }
   .qty { font-weight: 700; }
   .zero { color: #b00; }
+  /* 発注残・新規可能数（発注残シートに載っている商品だけ表示） */
+  .supply { font-size: 12.5px; margin-top: 5px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .supply .chip { display: inline-block; border-radius: 5px; padding: 2px 8px; font-weight: 700; }
+  .supply .c-zan { background: #e8f0fe; color: #1a56b8; }
+  .supply .c-ok  { background: #e6f4ea; color: #137333; }
+  .supply .c-ng  { background: #fde7e7; color: #b71c1c; }
+  .supply .c-lbl { color: #777; }
 </style>
 </head>
 <body>
@@ -51,9 +58,11 @@
 // ===== データ元（リンク共有スプレッドシートを直接読む。検索はスマホ内＝一瞬） =====
 const ZAIKO_SS  = "1yxdl0YUaEgmYmtUwfptDh1akwH6UCaljScuqbRr-mi8";   // 在庫スプシ（A:CD B:名 C:包装 D:ロット E:在庫 H:入庫 I:期限 J:備考）
 const MASTER_SS = "1GY-hwG62879m_U0QvRZ_VwWBTsXtrr5436iXYZESTjo";   // マスター（A:CD I:包装薬価 J:仕入単価）
+const HACHU_SS  = "1z5r4lf66DRjWbMvzNRevPaHbBy_n5On-lvMpArJDwNA";   // 発注残（A:商品CD E:発注残 R:新規可能数）
 
 let inv = null;      // 在庫行
 let prices = null;   // 商品CD → [薬価, 原価]
+let hachu = null;    // 商品CD → {zan:発注残, shinki:新規可能数}
 let updText = "";
 
 const kwEl = document.getElementById('kw');
@@ -115,8 +124,29 @@ window.onMaster = function(resp){
   }catch(e){ prices={}; ready(); }
 };
 
+// --- 発注残シート受信（A:商品CD E:発注残 R:新規可能数）---
+//   ・載っているのは限定品など一部の商品だけ。載っていない商品は今までどおり何も出さない。
+//   ・R列(新規可能数)が空欄＝新規を受けられる余力が無い場合がほとんどなので、
+//     「不可」とは書かずに表示そのものを省く（空欄でも残率が高い品が一部あるため）。
+window.onHachu = function(resp){
+  try{
+    const rows = resp.table.rows;
+    hachu = {};
+    for (let i=0;i<rows.length;i++){
+      const r=rows[i];
+      const cd=String(cellF(r,0)).trim();
+      if(!cd || cd==="商品CD") continue;
+      const zan=String(cellF(r,4)).trim();        // E列
+      const sh =String(cellF(r,17)).trim();       // R列
+      if(zan==="" && sh==="") continue;
+      hachu[cd]={zan:zan, shinki:sh};
+    }
+    ready();
+  }catch(e){ hachu={}; ready(); }
+};
+
 function ready(){
-  if(inv===null||prices===null)return;
+  if(inv===null||prices===null||hachu===null)return;
   statusEl.textContent = "準備OK（在庫 "+inv.length+" 行"+(updText?"・"+updText+" 取得":"")+"）";
 }
 
@@ -143,6 +173,8 @@ function doSearch(){
     g.lots.sort((a,b)=>String(a.expiry).localeCompare(String(b.expiry)));
     const p=prices[g.code];
     if(p&&p[0]>0){ g.yakka=p[0]; g.genka=p[1]; g.nebiki=Math.round((1-p[1]/p[0])*1000)/10; }
+    const h=hachu&&hachu[String(g.code).trim()];   // 商品CDで照合（同名で包装違いがあるため名前では引かない）
+    if(h) g.hachu=h;
     return g;
   });
   list.sort((a,b)=>b.total-a.total);
@@ -163,9 +195,20 @@ function render(list){
       priceLine='<div class="pprice">薬価 <b>'+yen(p.yakka)+'</b>　原価 <b>'+yen(p.genka)+'</b>　'+
                 '<span class="nb">値引 '+(p.nebiki!=null?p.nebiki.toFixed(1):'-')+'%</span></div>';
     }
+    // 発注残シートに載っている商品だけ、薬価の下に1行足す
+    let supplyLine='';
+    if(p.hachu){
+      let s='';
+      if(p.hachu.zan!=='') s+='<span class="c-lbl">発注残</span><span class="chip c-zan">'+esc(p.hachu.zan)+'</span>';
+      // 新規可能数が空欄＝新規は受けられない。発注残シートに載っている商品なので「不可」と明示する。
+      s += (p.hachu.shinki!=='')
+        ? '<span class="c-lbl">新規可能</span><span class="chip c-ok">'+esc(p.hachu.shinki)+'</span>'
+        : '<span class="c-lbl">新規</span><span class="chip c-ng">不可</span>';
+      if(s) supplyLine='<div class="supply">'+s+'</div>';
+    }
     html+='<div class="card"><div class="cardhead"><div>'+
       '<div class="pname">'+esc(p.name)+'</div>'+
-      '<div class="pmeta">包装: '+esc(p.pkg)+' ／ 商品CD: '+esc(p.code||'－')+'</div>'+priceLine+
+      '<div class="pmeta">包装: '+esc(p.pkg)+' ／ 商品CD: '+esc(p.code||'－')+'</div>'+priceLine+supplyLine+
       '</div><div class="total">合計 '+p.total+'</div></div>'+
       '<table><thead><tr><th>ロット</th><th>在庫数</th><th>使用期限</th><th>入庫日</th><th>備考</th></tr></thead>'+
       '<tbody>'+rows+'</tbody></table></div>';
@@ -183,6 +226,8 @@ kwEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); k
     document.body.appendChild(s); };
   load('https://docs.google.com/spreadsheets/d/'+ZAIKO_SS+'/gviz/tq?tqx=responseHandler:onZaiko');
   load('https://docs.google.com/spreadsheets/d/'+MASTER_SS+'/gviz/tq?gid=0&tqx=responseHandler:onMaster&tq='+encodeURIComponent('select A,I,J'));
+  // 発注残は headers=0 で読む（見出し行を自動判定されると1行目が落ちるため）
+  load('https://docs.google.com/spreadsheets/d/'+HACHU_SS+'/gviz/tq?gid=0&headers=0&tqx=responseHandler:onHachu');
 })();
 </script>
 </body>
