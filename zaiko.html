@@ -40,6 +40,7 @@
   .supply .c-ok  { background: #e6f4ea; color: #137333; }
   .supply .c-ng  { background: #fde7e7; color: #b71c1c; }
   .supply .c-lbl { color: #777; }
+  .supply .c-sub { color: #999; font-size: 11.5px; }
 </style>
 </head>
 <body>
@@ -59,10 +60,12 @@
 const ZAIKO_SS  = "1yxdl0YUaEgmYmtUwfptDh1akwH6UCaljScuqbRr-mi8";   // 在庫スプシ（A:CD B:名 C:包装 D:ロット E:在庫 H:入庫 I:期限 J:備考）
 const MASTER_SS = "1GY-hwG62879m_U0QvRZ_VwWBTsXtrr5436iXYZESTjo";   // マスター（A:CD I:包装薬価 J:仕入単価）
 const HACHU_SS  = "1z5r4lf66DRjWbMvzNRevPaHbBy_n5On-lvMpArJDwNA";   // 発注残（A:商品CD E:発注残 R:新規可能数）
+const SHINKI_SS = "1L9qqgGM66k6swXa3TPWJi-Aq4gqAdHD4xwF9B4h1tz4";   // 新規実績（実績明細：E:商品cd J:数量）
 
 let inv = null;      // 在庫行
 let prices = null;   // 商品CD → [薬価, 原価]
 let hachu = null;    // 商品CD → {zan:発注残, shinki:新規可能数}
+let shinki = null;   // 商品CD → 今月の新規実績（数量の合計）
 let updText = "";
 
 const kwEl = document.getElementById('kw');
@@ -134,7 +137,7 @@ window.onHachu = function(resp){
     hachu = {};
     for (let i=0;i<rows.length;i++){
       const r=rows[i];
-      const cd=String(cellF(r,0)).trim();
+      const cd=normCd(cellF(r,0));
       if(!cd || cd==="商品CD") continue;
       const zan=String(cellF(r,4)).trim();        // E列
       const sh =String(cellF(r,17)).trim();       // R列
@@ -148,8 +151,32 @@ window.onHachu = function(resp){
   }catch(e){ hachu={}; ready(); }
 };
 
+// --- 新規実績受信（実績明細：E列=商品cd J列=数量）---
+//   今月すでに新規で出た数量を商品ごとに合計し、新規可能数から差し引く。
+//   先頭0の商品CD（0031200 等）があるため、照合前に数値へ揃える。
+window.onShinki = function(resp){
+  try{
+    const rows = resp.table.rows;
+    shinki = {};
+    for (let i=0;i<rows.length;i++){
+      const r=rows[i];
+      const cd=normCd(cellF(r,4));
+      if(!cd || cd==="商品cd") continue;
+      const q=Number(String(cellF(r,9)).replace(/[,\s]/g,""));
+      if(!isFinite(q)) continue;
+      shinki[cd]=(shinki[cd]||0)+q;
+    }
+    ready();
+  }catch(e){ shinki={}; ready(); }
+};
+// 商品CDの表記ゆれ吸収（先頭0を落とす）。発注残・実績・在庫で桁が揃っていないため。
+function normCd(v){
+  const s=String(v==null?"":v).trim();
+  return /^\d+$/.test(s) ? String(Number(s)) : s;
+}
+
 function ready(){
-  if(inv===null||prices===null||hachu===null)return;
+  if(inv===null||prices===null||hachu===null||shinki===null)return;
   statusEl.textContent = "準備OK（在庫 "+inv.length+" 行"+(updText?"・"+updText+" 取得":"")+"）";
 }
 
@@ -176,8 +203,11 @@ function doSearch(){
     g.lots.sort((a,b)=>String(a.expiry).localeCompare(String(b.expiry)));
     const p=prices[g.code];
     if(p&&p[0]>0){ g.yakka=p[0]; g.genka=p[1]; g.nebiki=Math.round((1-p[1]/p[0])*1000)/10; }
-    const h=hachu&&hachu[String(g.code).trim()];   // 商品CDで照合（同名で包装違いがあるため名前では引かない）
-    if(h) g.hachu=h;
+    const h=hachu&&hachu[normCd(g.code)];   // 商品CDで照合（同名で包装違いがあるため名前では引かない）
+    if(h){
+      g.hachu=h;
+      g.used=(shinki&&shinki[normCd(g.code)])||0;   // 今月の新規実績
+    }
     return g;
   });
   list.sort((a,b)=>b.total-a.total);
@@ -203,10 +233,21 @@ function render(list){
     if(p.hachu){
       let s='';
       if(p.hachu.zan!=='') s+='<span class="c-lbl">発注残</span><span class="chip c-zan">'+esc(p.hachu.zan)+'</span>';
-      // 新規可能数が空欄＝新規は受けられない。発注残シートに載っている商品なので「不可」と明示する。
-      s += (p.hachu.shinki!=='')
-        ? '<span class="c-lbl">新規可能</span><span class="chip c-ok">'+esc(p.hachu.shinki)+'</span>'
-        : '<span class="c-lbl">新規</span><span class="chip c-ng">不可</span>';
+      // 新規可能数から今月の新規実績を引いた「残り」を出す。
+      //   例）枠103本・実績3 → 「新規可能 100本（103−3）」
+      //   枠を使い切った（残り0以下）場合と、枠が空欄の場合は「不可」。
+      const m = String(p.hachu.shinki).match(/[\d.]+/);
+      if(m){
+        const unit = String(p.hachu.shinki).replace(/[\d.,\s]/g,'') || '';
+        const rest = Number(m[0]) - (p.used||0);
+        s += (rest > 0)
+          ? '<span class="c-lbl">新規可能</span><span class="chip c-ok">'+rest+esc(unit)+'</span>'
+            + (p.used ? '<span class="c-sub">（'+esc(m[0])+'−'+p.used+'）</span>' : '')
+          : '<span class="c-lbl">新規</span><span class="chip c-ng">不可</span>'
+            + '<span class="c-sub">（枠'+esc(m[0])+'・実績'+(p.used||0)+'）</span>';
+      }else{
+        s += '<span class="c-lbl">新規</span><span class="chip c-ng">不可</span>';
+      }
       if(s) supplyLine='<div class="supply">'+s+'</div>';
     }
     html+='<div class="card"><div class="cardhead"><div>'+
@@ -231,6 +272,7 @@ kwEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); k
   load('https://docs.google.com/spreadsheets/d/'+MASTER_SS+'/gviz/tq?gid=0&tqx=responseHandler:onMaster&tq='+encodeURIComponent('select A,I,J'));
   // 発注残は headers=0 で読む（見出し行を自動判定されると1行目が落ちるため）
   load('https://docs.google.com/spreadsheets/d/'+HACHU_SS+'/gviz/tq?gid=0&headers=0&tqx=responseHandler:onHachu');
+  load('https://docs.google.com/spreadsheets/d/'+SHINKI_SS+'/gviz/tq?gid=0&headers=0&tqx=responseHandler:onShinki');
 })();
 </script>
 </body>
