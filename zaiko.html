@@ -138,8 +138,11 @@ window.onHachu = function(resp){
       if(!cd || cd==="商品CD") continue;
       const zan=String(cellF(r,4)).trim();        // E列
       const sh =String(cellF(r,17)).trim();       // R列
-      if(zan==="" && sh==="") continue;
-      hachu[cd]={zan:zan, shinki:sh};
+      // ★このシートに載っていること自体が「発注制限のある品目」という意味。
+      //   空欄は「発注残ゼロ＝新規も不可」なので、捨てずに0として扱う。
+      //   （以前は両方空欄の行を読み飛ばしていたため、オルメサルタンOD10mg等が
+      //     同じ商品の規格違いだけ表示される状態になっていた）
+      hachu[cd]={zan:(zan===""?"0":zan), shinki:sh};
     }
     ready();
   }catch(e){ hachu={}; ready(); }
